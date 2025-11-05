@@ -123,6 +123,19 @@ rec tradeDirection = if longEntrySignal then 1
 
 def newEntry = longEntrySignal or shortEntrySignal;
 
+# Capture point differences at entry - held constant throughout trade
+rec t1Points = if longEntrySignal then Round(longT1 - IBHigh, 2)
+               else if shortEntrySignal then Round(IBLow - shortT1, 2)
+               else t1Points[1];
+
+rec t2Points = if longEntrySignal then Round(longT2 - IBHigh, 2)
+               else if shortEntrySignal then Round(IBLow - shortT2, 2)
+               else t2Points[1];
+
+rec stopPoints = if longEntrySignal then Round(IBHigh - longStop, 2)
+                 else if shortEntrySignal then Round(shortStop - IBLow, 2)
+                 else stopPoints[1];
+
 rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
              else if tradeDirection == -1 and low <= shortT1 then 1
              else if newEntry or firstBar then 0
@@ -143,12 +156,12 @@ def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == 
 def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
 def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1", Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1", Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1, high + bubbleOffset, "T2", Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1, low - bubbleOffset, "T2", Color.CYAN, no);
-AddChartBubble(showStopBubble and tradeDirection == 1, low - bubbleOffset, "Stop", Color.RED, no);
-AddChartBubble(showStopBubble and tradeDirection == -1, high + bubbleOffset, "Stop", Color.RED, yes);
+AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1: " + t1Points, Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1: " + t1Points, Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1, high + bubbleOffset, "T2: " + t2Points, Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1, low - bubbleOffset, "T2: " + t2Points, Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1, low - bubbleOffset, "Stop: " + stopPoints, Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1, high + bubbleOffset, "Stop: " + stopPoints, Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
 def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
