@@ -83,31 +83,45 @@ rec entryT2 = if newEntry then (if longEntrySignal then longT2 else shortT2)
               else if firstBar or !marketOpen then Double.NaN
               else entryT2[1];
 
-# ========== Exit Conditions ==========
-# T1 exit - close 50% of position
-def t1Exit = (tradeDirection == 1 and high >= entryT1) or
-             (tradeDirection == -1 and low <= entryT1);
+# ========== Exit Tracking - Prevent Multiple Fills ==========
+# Track which exits have been triggered
+rec t1_hit = if newEntry or firstBar then 0
+             else if (tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1) then 1
+             else t1_hit[1];
 
-# T2 exit - close remaining 50% of position
-def t2Exit = (tradeDirection == 1 and high >= entryT2) or
-             (tradeDirection == -1 and low <= entryT2);
+rec t2_hit = if newEntry or firstBar then 0
+             else if (tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2) then 1
+             else t2_hit[1];
 
-# Stop exit - close entire position
-def stopExit = (tradeDirection == 1 and low <= entryStopLevel) or
-               (tradeDirection == -1 and high >= entryStopLevel);
+rec stop_hit = if newEntry or firstBar then 0
+               else if (tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel) then 1
+               else stop_hit[1];
 
-# Market close exit - close any open positions
-def marketCloseExit = !marketOpen and (tradeDirection == 1 or tradeDirection == -1);
+# ========== Exit Conditions - Fire Once Only ==========
+# T1 exit - close 50% of position (only if stop hasn't been hit)
+def t1Exit = ((tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1))
+             and !t1_hit[1] and !stop_hit;
+
+# T2 exit - close remaining 50% of position (only if stop hasn't been hit)
+def t2Exit = ((tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2))
+             and !t2_hit[1] and !stop_hit;
+
+# Stop exit - close entire position (takes priority, fires once)
+def stopExit = ((tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel))
+               and !stop_hit[1];
+
+# Market close exit - close any remaining open positions
+def marketCloseExit = pastClose and !firstBar and (tradeDirection == 1 or tradeDirection == -1) and !stop_hit;
 
 # ========== Strategy Orders ==========
-AddOrder(OrderType.BUY_TO_OPEN, longEntrySignal, open[-1], 2, Color.GREEN, Color.GREEN, "Long Entry");
-AddOrder(OrderType.SELL_TO_CLOSE, t1Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T1 Exit");
-AddOrder(OrderType.SELL_TO_CLOSE, t2Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T2 Exit");
-AddOrder(OrderType.SELL_TO_CLOSE, stopExit and tradeDirection == 1, close, 2, Color.RED, Color.RED, "Long Stop Exit");
-AddOrder(OrderType.SELL_TO_CLOSE, marketCloseExit and tradeDirection == 1, close, 2, Color.ORANGE, Color.ORANGE, "Long Market Close");
+AddOrder(OrderType.BUY_TO_OPEN, longEntrySignal, close, 2, Color.GREEN, Color.GREEN, "Long Entry");
+AddOrder(OrderType.SELL_TO_CLOSE, t1Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T1");
+AddOrder(OrderType.SELL_TO_CLOSE, t2Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T2");
+AddOrder(OrderType.SELL_TO_CLOSE, stopExit and tradeDirection == 1, close, 2, Color.RED, Color.RED, "Long Stop");
+AddOrder(OrderType.SELL_TO_CLOSE, marketCloseExit and tradeDirection == 1, close, 2, Color.ORANGE, Color.ORANGE, "Long Close");
 
-AddOrder(OrderType.SELL_TO_OPEN, shortEntrySignal, open[-1], 2, Color.RED, Color.RED, "Short Entry");
-AddOrder(OrderType.BUY_TO_CLOSE, t1Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T1 Exit");
-AddOrder(OrderType.BUY_TO_CLOSE, t2Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T2 Exit");
-AddOrder(OrderType.BUY_TO_CLOSE, stopExit and tradeDirection == -1, close, 2, Color.RED, Color.RED, "Short Stop Exit");
-AddOrder(OrderType.BUY_TO_CLOSE, marketCloseExit and tradeDirection == -1, close, 2, Color.ORANGE, Color.ORANGE, "Short Market Close");
+AddOrder(OrderType.SELL_TO_OPEN, shortEntrySignal, close, 2, Color.RED, Color.RED, "Short Entry");
+AddOrder(OrderType.BUY_TO_CLOSE, t1Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T1");
+AddOrder(OrderType.BUY_TO_CLOSE, t2Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T2");
+AddOrder(OrderType.BUY_TO_CLOSE, stopExit and tradeDirection == -1, close, 2, Color.RED, Color.RED, "Short Stop");
+AddOrder(OrderType.BUY_TO_CLOSE, marketCloseExit and tradeDirection == -1, close, 2, Color.ORANGE, Color.ORANGE, "Short Close");
