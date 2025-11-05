@@ -134,9 +134,9 @@ rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
                else if newEntry or firstBar then 0
                else stop_hit[1];
 
-# Bubble conditions
-def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1];
-def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1];
+# Bubble conditions - only show if trade is active (stop hasn't been hit)
+def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1] and !stop_hit;
+def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
 def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
 
 AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
