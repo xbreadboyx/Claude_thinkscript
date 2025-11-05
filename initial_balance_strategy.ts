@@ -81,16 +81,13 @@ EMA_Fast.SetLineWeight(1);
 EMA_Medium.SetLineWeight(1);
 EMA_Slow.SetLineWeight(1);
 
-# Entry signals with EMA filter
-def longEntrySignal = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
-def shortEntrySignal = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
+# Raw entry conditions (price crosses IB levels)
+def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
+def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
-# Vertical lines for entries
-AddVerticalLine(longEntrySignal and pastOpeningRange and marketOpen, "Long Triggered", Color.GREEN, Curve.SHORT_DASH);
-AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short Triggered", Color.RED, Curve.SHORT_DASH);
-
-rec tradeState = if longEntrySignal then 1 else if shortEntrySignal then -1 else if firstBar then 0 else tradeState[1];
-def isNewSignal = longEntrySignal or shortEntrySignal;
+# Use raw entries for trade state tracking
+rec tradeState = if rawLongEntry then 1 else if rawShortEntry then -1 else if firstBar then 0 else tradeState[1];
+def isNewSignal = rawLongEntry or rawShortEntry;
 
 rec t1p_was_hit = if tradeState == 1 and high >= extp1 then 1 else if isNewSignal or firstBar then 0 else t1p_was_hit[1];
 rec t2p_was_hit = if tradeState == 1 and high >= extp2 then 1 else if isNewSignal or firstBar then 0 else t2p_was_hit[1];
@@ -102,6 +99,20 @@ rec anyTargetHit = if isNewSignal or firstBar then 0 else if t1p_was_hit or t2p_
 def longStopCondition = tradeState == 1 and low <= (IBHigh - stopLossPoints);
 def shortStopCondition = tradeState == -1 and high >= (IBLow + stopLossPoints);
 rec stop_was_hit = if isNewSignal or firstBar then 0 else if (longStopCondition or shortStopCondition) and !anyTargetHit then 1 else stop_was_hit[1];
+
+# Track if there's an active trade (one that hasn't hit T1 or stop yet)
+rec hasActiveTrade = if firstBar then 0
+                     else if t1p_was_hit or t1n_was_hit or stop_was_hit then 0
+                     else if isNewSignal then 1
+                     else hasActiveTrade[1];
+
+# Filtered entry signals - only trigger when no active trade exists
+def longEntrySignal = rawLongEntry and !hasActiveTrade[1];
+def shortEntrySignal = rawShortEntry and !hasActiveTrade[1];
+
+# Vertical lines for entries (only show when no active trade)
+AddVerticalLine(longEntrySignal and pastOpeningRange and marketOpen, "Long Triggered", Color.GREEN, Curve.SHORT_DASH);
+AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short Triggered", Color.RED, Curve.SHORT_DASH);
 
 def plot_t1p_bubble = tradeState == 1 and high >= extp1 and !t1p_was_hit[1];
 def plot_t2p_bubble = tradeState == 1 and high >= extp2 and !t2p_was_hit[1];
