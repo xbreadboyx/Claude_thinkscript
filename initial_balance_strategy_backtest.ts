@@ -1,7 +1,6 @@
 # Initial Balance Trading Strategy - Backtest Version
-# Optimized for backtesting different stop loss, target, and timeframe settings
+# Optimized for backtesting - Strategy with AddOrder()
 
-# ========== Input Parameters ==========
 input InitialBalanceMinutes = 60;
 input Market_Open_Time = 0930;
 input Market_Close_Time = 1600;
@@ -14,7 +13,7 @@ input emaFast = 8;
 input emaMedium = 21;
 input emaSlow = 34;
 
-# ========== Time and Session Management ==========
+# Time Management
 def day = GetDay();
 def pastOpen = SecondsTillTime(Market_Open_Time) <= 0;
 def pastClose = SecondsTillTime(Market_Close_Time) <= 0;
@@ -23,13 +22,13 @@ def firstBar = day[1] != day;
 def secondsFromOpen = SecondsFromTime(Market_Open_Time);
 def pastOpeningRange = secondsFromOpen >= InitialBalanceMinutes * 60;
 
-# ========== Initial Balance Calculation ==========
+# Initial Balance
 rec displayedHigh = if !marketOpen or firstBar then high else Max(high, displayedHigh[1]);
 rec displayedLow = if !marketOpen or firstBar then low else Min(low, displayedLow[1]);
 rec IBHigh = if pastOpeningRange then IBHigh[1] else displayedHigh;
 rec IBLow = if pastOpeningRange then IBLow[1] else displayedLow;
 
-# ========== ATR-Based Targets and Stops ==========
+# ATR Targets and Stops
 def atr = ATR(length = atrPeriod);
 def longT1 = IBHigh + (atr * atrMultiplierT1);
 def longT2 = IBHigh + (atr * atrMultiplierT2);
@@ -38,90 +37,65 @@ def shortT2 = IBLow - (atr * atrMultiplierT2);
 def longStop = IBHigh - (atr * stopLossATRMultiplier);
 def shortStop = IBLow + (atr * stopLossATRMultiplier);
 
-# ========== EMA Trend Filter ==========
+# EMA Filter
 def ema1 = ExpAverage(close, emaFast);
 def ema2 = ExpAverage(close, emaMedium);
 def ema3 = ExpAverage(close, emaSlow);
 def bullishStack = ema1 > ema2 and ema2 > ema3;
 def bearishStack = ema1 < ema2 and ema2 < ema3;
 
-# ========== Entry Signal Logic ==========
-def rawLongEntry = close > IBHigh and close[1] <= IBHigh and (!useEMAFilter or bullishStack);
-def rawShortEntry = close < IBLow and close[1] >= IBLow and (!useEMAFilter or bearishStack);
+# Entry Conditions
+def rawLongEntry = close > IBHigh and close[1] <= IBHigh and (!useEMAFilter or bullishStack) and pastOpeningRange and marketOpen;
+def rawShortEntry = close < IBLow and close[1] >= IBLow and (!useEMAFilter or bearishStack) and pastOpeningRange and marketOpen;
 
-# Track if T1, T2, or stop was hit to determine if we can take new trades
-rec inTrade = if firstBar or !pastOpeningRange or !marketOpen then 0
-              else if (inTrade[1] == 1 and (high >= longT1 or high >= longT2 or low <= longStop)) then 0
-              else if (inTrade[1] == -1 and (low <= shortT1 or low <= shortT2 or high >= shortStop)) then 0
-              else if rawLongEntry and inTrade[1] == 0 then 1
-              else if rawShortEntry and inTrade[1] == 0 then -1
-              else inTrade[1];
+# Entry Signals - prevent rapid-fire by checking previous bar
+def longEntry = rawLongEntry and !rawLongEntry[1];
+def shortEntry = rawShortEntry and !rawShortEntry[1];
 
-# Entry signals fire only when no active trade
-def longEntrySignal = rawLongEntry and inTrade[1] == 0 and pastOpeningRange and marketOpen;
-def shortEntrySignal = rawShortEntry and inTrade[1] == 0 and pastOpeningRange and marketOpen;
+# Capture levels at entry
+rec entryStop = if longEntry then longStop
+                else if shortEntry then shortStop
+                else if firstBar or !marketOpen then Double.NaN
+                else entryStop[1];
 
-# ========== Trade Direction Tracking ==========
-rec tradeDirection = if longEntrySignal then 1
-                     else if shortEntrySignal then -1
-                     else if firstBar or !marketOpen then 0
-                     else tradeDirection[1];
+rec entryTarget1 = if longEntry then longT1
+                   else if shortEntry then shortT1
+                   else if firstBar or !marketOpen then Double.NaN
+                   else entryTarget1[1];
 
-def newEntry = longEntrySignal or shortEntrySignal;
+rec entryTarget2 = if longEntry then longT2
+                   else if shortEntry then shortT2
+                   else if firstBar or !marketOpen then Double.NaN
+                   else entryTarget2[1];
 
-# Capture stop level at entry - held constant throughout trade
-rec entryStopLevel = if newEntry then (if longEntrySignal then longStop else shortStop)
-                     else if firstBar or !marketOpen then Double.NaN
-                     else entryStopLevel[1];
+# Track which exits fired
+rec t1Hit = if longEntry or shortEntry or firstBar then 0
+            else if !IsNaN(entryTarget1) and (high >= entryTarget1 or low <= entryTarget1) then 1
+            else t1Hit[1];
 
-# Capture target levels at entry - held constant throughout trade
-rec entryT1 = if newEntry then (if longEntrySignal then longT1 else shortT1)
-              else if firstBar or !marketOpen then Double.NaN
-              else entryT1[1];
+rec t2Hit = if longEntry or shortEntry or firstBar then 0
+            else if !IsNaN(entryTarget2) and (high >= entryTarget2 or low <= entryTarget2) then 1
+            else t2Hit[1];
 
-rec entryT2 = if newEntry then (if longEntrySignal then longT2 else shortT2)
-              else if firstBar or !marketOpen then Double.NaN
-              else entryT2[1];
+rec stopHit = if longEntry or shortEntry or firstBar then 0
+              else if !IsNaN(entryStop) and (low <= entryStop or high >= entryStop) then 1
+              else stopHit[1];
 
-# ========== Exit Tracking - Prevent Multiple Fills ==========
-# Track which exits have been triggered
-rec t1_hit = if newEntry or firstBar then 0
-             else if (tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1) then 1
-             else t1_hit[1];
+# Exit Conditions
+def t1Exit = !IsNaN(entryTarget1) and (high >= entryTarget1 or low <= entryTarget1) and !t1Hit[1] and !stopHit;
+def t2Exit = !IsNaN(entryTarget2) and (high >= entryTarget2 or low <= entryTarget2) and !t2Hit[1] and !stopHit;
+def stopExit = !IsNaN(entryStop) and (low <= entryStop or high >= entryStop) and !stopHit[1];
+def closeExit = pastClose and !firstBar and (!stopHit or !t2Hit);
 
-rec t2_hit = if newEntry or firstBar then 0
-             else if (tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2) then 1
-             else t2_hit[1];
+# Strategy Orders
+AddOrder(OrderType.BUY_TO_OPEN, longEntry, close, 2, Color.GREEN, Color.GREEN, "Long");
+AddOrder(OrderType.SELL_TO_CLOSE, t1Exit and longEntry[1], close, 1, Color.CYAN, Color.CYAN, "Long T1");
+AddOrder(OrderType.SELL_TO_CLOSE, t2Exit and longEntry[1], close, 1, Color.CYAN, Color.CYAN, "Long T2");
+AddOrder(OrderType.SELL_TO_CLOSE, stopExit and longEntry[1], close, 2, Color.RED, Color.RED, "Long Stop");
+AddOrder(OrderType.SELL_TO_CLOSE, closeExit and longEntry[1], close, 2, Color.ORANGE, Color.ORANGE, "Long Close");
 
-rec stop_hit = if newEntry or firstBar then 0
-               else if (tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel) then 1
-               else stop_hit[1];
-
-# ========== Exit Conditions - Fire Once Only ==========
-# T1 exit - close 50% of position (only if stop hasn't been hit)
-def t1Exit = ((tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1))
-             and !t1_hit[1] and !stop_hit;
-
-# T2 exit - close remaining 50% of position (only if stop hasn't been hit)
-def t2Exit = ((tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2))
-             and !t2_hit[1] and !stop_hit;
-
-# Stop exit - close entire position (takes priority, fires once)
-def stopExit = ((tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel))
-               and !stop_hit[1];
-
-# Market close exit - close any remaining open positions
-def marketCloseExit = pastClose and !firstBar and (tradeDirection == 1 or tradeDirection == -1) and !stop_hit;
-
-# ========== Strategy Orders ==========
-AddOrder(OrderType.BUY_TO_OPEN, longEntrySignal, close, 2, Color.GREEN, Color.GREEN, "Long Entry");
-AddOrder(OrderType.SELL_TO_CLOSE, t1Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T1");
-AddOrder(OrderType.SELL_TO_CLOSE, t2Exit and tradeDirection == 1, close, 1, Color.CYAN, Color.CYAN, "Long T2");
-AddOrder(OrderType.SELL_TO_CLOSE, stopExit and tradeDirection == 1, close, 2, Color.RED, Color.RED, "Long Stop");
-AddOrder(OrderType.SELL_TO_CLOSE, marketCloseExit and tradeDirection == 1, close, 2, Color.ORANGE, Color.ORANGE, "Long Close");
-
-AddOrder(OrderType.SELL_TO_OPEN, shortEntrySignal, close, 2, Color.RED, Color.RED, "Short Entry");
-AddOrder(OrderType.BUY_TO_CLOSE, t1Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T1");
-AddOrder(OrderType.BUY_TO_CLOSE, t2Exit and tradeDirection == -1, close, 1, Color.CYAN, Color.CYAN, "Short T2");
-AddOrder(OrderType.BUY_TO_CLOSE, stopExit and tradeDirection == -1, close, 2, Color.RED, Color.RED, "Short Stop");
-AddOrder(OrderType.BUY_TO_CLOSE, marketCloseExit and tradeDirection == -1, close, 2, Color.ORANGE, Color.ORANGE, "Short Close");
+AddOrder(OrderType.SELL_TO_OPEN, shortEntry, close, 2, Color.RED, Color.RED, "Short");
+AddOrder(OrderType.BUY_TO_CLOSE, t1Exit and shortEntry[1], close, 1, Color.CYAN, Color.CYAN, "Short T1");
+AddOrder(OrderType.BUY_TO_CLOSE, t2Exit and shortEntry[1], close, 1, Color.CYAN, Color.CYAN, "Short T2");
+AddOrder(OrderType.BUY_TO_CLOSE, stopExit and shortEntry[1], close, 2, Color.RED, Color.RED, "Short Stop");
+AddOrder(OrderType.BUY_TO_CLOSE, closeExit and shortEntry[1], close, 2, Color.ORANGE, Color.ORANGE, "Short Close");
