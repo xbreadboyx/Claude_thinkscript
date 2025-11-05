@@ -96,10 +96,10 @@ EMA_Slow.SetLineWeight(1);
 def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
 def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
-# Track if T1 or stop was hit to determine if we can take new trades
-rec inTrade = if firstBar or !pastOpeningRange then 0
-              else if (inTrade[1] == 1 and (high >= longT1 or low <= longStop)) then 0
-              else if (inTrade[1] == -1 and (low <= shortT1 or high >= shortStop)) then 0
+# Track if T1, T2, or stop was hit to determine if we can take new trades
+rec inTrade = if firstBar or !pastOpeningRange or !marketOpen then 0
+              else if (inTrade[1] == 1 and (high >= longT1 or high >= longT2 or low <= longStop)) then 0
+              else if (inTrade[1] == -1 and (low <= shortT1 or low <= shortT2 or high >= shortStop)) then 0
               else if rawLongEntry and inTrade[1] == 0 then 1
               else if rawShortEntry and inTrade[1] == 0 then -1
               else inTrade[1];
@@ -114,7 +114,7 @@ AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short", C
 # ========== Target and Stop Tracking for Bubbles ==========
 rec tradeDirection = if longEntrySignal then 1
                      else if shortEntrySignal then -1
-                     else if firstBar then 0
+                     else if firstBar or !marketOpen then 0
                      else tradeDirection[1];
 
 def newEntry = longEntrySignal or shortEntrySignal;
