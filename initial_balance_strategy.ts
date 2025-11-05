@@ -123,19 +123,6 @@ rec tradeDirection = if longEntrySignal then 1
 
 def newEntry = longEntrySignal or shortEntrySignal;
 
-# Capture point differences at entry - held constant throughout trade, reset when trade closes
-rec t1Points = if newEntry then (if longEntrySignal then Round(longT1 - IBHigh, 2) else Round(IBLow - shortT1, 2))
-               else if firstBar or !marketOpen then 0
-               else t1Points[1];
-
-rec t2Points = if newEntry then (if longEntrySignal then Round(longT2 - IBHigh, 2) else Round(IBLow - shortT2, 2))
-               else if firstBar or !marketOpen then 0
-               else t2Points[1];
-
-rec stopPoints = if newEntry then (if longEntrySignal then Round(IBHigh - longStop, 2) else Round(shortStop - IBLow, 2))
-                 else if firstBar or !marketOpen then 0
-                 else stopPoints[1];
-
 # Capture actual stop level at entry - held constant throughout trade
 rec entryStopLevel = if newEntry then (if longEntrySignal then longStop else shortStop)
                      else if firstBar or !marketOpen then Double.NaN
@@ -161,12 +148,12 @@ def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == 
 def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
 def showStopBubble = (tradeDirection == 1 and low <= entryStopLevel or tradeDirection == -1 and high >= entryStopLevel) and !t1_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1: " + t1Points, Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1: " + t1Points, Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1, high + bubbleOffset, "T2: " + t2Points, Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1, low - bubbleOffset, "T2: " + t2Points, Color.CYAN, no);
-AddChartBubble(showStopBubble and tradeDirection == 1, low - bubbleOffset, "Stop: " + stopPoints, Color.RED, no);
-AddChartBubble(showStopBubble and tradeDirection == -1, high + bubbleOffset, "Stop: " + stopPoints, Color.RED, yes);
+AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1", Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1", Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1, high + bubbleOffset, "T2", Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1, low - bubbleOffset, "T2", Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1, low - bubbleOffset, "Stop", Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1, high + bubbleOffset, "Stop", Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
 # Use captured stop level from entry instead of dynamic calculation
