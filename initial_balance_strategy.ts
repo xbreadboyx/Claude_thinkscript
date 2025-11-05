@@ -1,15 +1,21 @@
+# Initial Balance Trading Strategy with ATR-Based Targets
+# Clean, optimized version with efficient trade filtering
+
 input showOnlyToday = yes;
 input InitialBalanceMinutes = 60;
 input Market_Open_Time = 0930;
 input Market_Close_Time = 1600;
-input coeff1 = 0.50;
-input coeff2 = 1.00;
-input stopLossPoints = 3.0;
+input atrPeriod = 14;
+input atrMultiplierT1 = 1.0;
+input atrMultiplierT2 = 1.5;
+input stopLossATRMultiplier = 1.0;
 input useEMAFilter = yes;
 input emaFast = 8;
 input emaMedium = 21;
 input emaSlow = 34;
+input showLabels = yes;
 
+# ========== Time and Session Management ==========
 def day = GetDay();
 def isToday = day == GetLastDay();
 def shouldPlot = if showOnlyToday then isToday else 1;
@@ -17,13 +23,12 @@ def pastOpen = SecondsTillTime(Market_Open_Time) <= 0;
 def pastClose = SecondsTillTime(Market_Close_Time) <= 0;
 def marketOpen = pastOpen and !pastClose;
 def firstBar = day[1] != day;
-
 def secondsFromOpen = SecondsFromTime(Market_Open_Time);
 def pastOpeningRange = secondsFromOpen >= InitialBalanceMinutes * 60;
 
+# ========== Initial Balance Calculation ==========
 rec displayedHigh = if !marketOpen or firstBar then high else Max(high, displayedHigh[1]);
 rec displayedLow = if !marketOpen or firstBar then low else Min(low, displayedLow[1]);
-
 rec IBHigh = if pastOpeningRange then IBHigh[1] else displayedHigh;
 rec IBLow = if pastOpeningRange then IBLow[1] else displayedLow;
 
@@ -35,45 +40,50 @@ IBH.SetLineWeight(2);
 IBL.SetDefaultColor(Color.MAGENTA);
 IBL.SetStyle(Curve.SHORT_DASH);
 IBL.SetLineWeight(2);
-
 AddCloud(IBH, IBL, Color.LIGHT_GRAY, Color.LIGHT_GRAY);
 
-def ORWidth = IBH - IBL;
-plot Mid = (IBH + IBL) / 2;
+plot Mid = if pastOpeningRange and marketOpen and shouldPlot then (IBH + IBL) / 2 else Double.NaN;
 Mid.SetDefaultColor(Color.MAGENTA);
 Mid.SetStyle(Curve.SHORT_DASH);
 Mid.SetLineWeight(1);
 
-plot extp1 = IBH + (ORWidth * coeff1);
-plot extp2 = IBH + (ORWidth * coeff2);
-plot extn1 = IBL - (ORWidth * coeff1);
-plot extn2 = IBL - (ORWidth * coeff2);
-extp1.SetDefaultColor(Color.CYAN);
-extp2.SetDefaultColor(Color.CYAN);
-extn1.SetDefaultColor(Color.CYAN);
-extn2.SetDefaultColor(Color.CYAN);
-extp1.SetStyle(Curve.SHORT_DASH);
-extp2.SetStyle(Curve.SHORT_DASH);
-extn1.SetStyle(Curve.SHORT_DASH);
-extn2.SetStyle(Curve.SHORT_DASH);
-extp1.SetLineWeight(1);
-extp2.SetLineWeight(1);
-extn1.SetLineWeight(1);
-extn2.SetLineWeight(1);
+# ========== ATR-Based Targets ==========
+def atr = ATR(length = atrPeriod);
+def longT1 = IBHigh + (atr * atrMultiplierT1);
+def longT2 = IBHigh + (atr * atrMultiplierT2);
+def shortT1 = IBLow - (atr * atrMultiplierT1);
+def shortT2 = IBLow - (atr * atrMultiplierT2);
+def longStop = IBHigh - (atr * stopLossATRMultiplier);
+def shortStop = IBLow + (atr * stopLossATRMultiplier);
 
-# Stacked EMA Trend Filter
+plot LongTarget1 = if pastOpeningRange and marketOpen and shouldPlot then longT1 else Double.NaN;
+plot LongTarget2 = if pastOpeningRange and marketOpen and shouldPlot then longT2 else Double.NaN;
+plot ShortTarget1 = if pastOpeningRange and marketOpen and shouldPlot then shortT1 else Double.NaN;
+plot ShortTarget2 = if pastOpeningRange and marketOpen and shouldPlot then shortT2 else Double.NaN;
+
+LongTarget1.SetDefaultColor(Color.CYAN);
+LongTarget2.SetDefaultColor(Color.CYAN);
+ShortTarget1.SetDefaultColor(Color.CYAN);
+ShortTarget2.SetDefaultColor(Color.CYAN);
+LongTarget1.SetStyle(Curve.SHORT_DASH);
+LongTarget2.SetStyle(Curve.SHORT_DASH);
+ShortTarget1.SetStyle(Curve.SHORT_DASH);
+ShortTarget2.SetStyle(Curve.SHORT_DASH);
+LongTarget1.SetLineWeight(1);
+LongTarget2.SetLineWeight(1);
+ShortTarget1.SetLineWeight(1);
+ShortTarget2.SetLineWeight(1);
+
+# ========== EMA Trend Filter ==========
 def ema1 = ExpAverage(close, emaFast);
 def ema2 = ExpAverage(close, emaMedium);
 def ema3 = ExpAverage(close, emaSlow);
-
 def bullishStack = ema1 > ema2 and ema2 > ema3;
 def bearishStack = ema1 < ema2 and ema2 < ema3;
 
-# Plot EMAs
 plot EMA_Fast = ema1;
 plot EMA_Medium = ema2;
 plot EMA_Slow = ema3;
-
 EMA_Fast.SetDefaultColor(Color.YELLOW);
 EMA_Medium.SetDefaultColor(Color.ORANGE);
 EMA_Slow.SetDefaultColor(Color.DARK_ORANGE);
@@ -81,102 +91,80 @@ EMA_Fast.SetLineWeight(1);
 EMA_Medium.SetLineWeight(1);
 EMA_Slow.SetLineWeight(1);
 
-# Raw entry conditions (price crosses IB levels with EMA filter)
+# ========== Entry Signal Logic ==========
+# Raw entry conditions
 def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
 def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
-# Simple tracker: are we in an active trade that hasn't hit T1 or stop?
-# Reset to 0: during opening range, first bar, or when we should allow new trades
-# Set to 1 or -1: when an entry signal fires
-rec activeTradeDirection = if firstBar or !pastOpeningRange then 0
-                          else if activeTradeDirection[1] != 0 then activeTradeDirection[1]
-                          else if rawLongEntry then 1
-                          else if rawShortEntry then -1
-                          else 0;
+# Track if T1 or stop was hit to determine if we can take new trades
+rec inTrade = if firstBar or !pastOpeningRange then 0
+              else if (inTrade[1] == 1 and (high >= longT1 or low <= longStop)) then 0
+              else if (inTrade[1] == -1 and (low <= shortT1 or high >= shortStop)) then 0
+              else if rawLongEntry and inTrade[1] == 0 then 1
+              else if rawShortEntry and inTrade[1] == 0 then -1
+              else inTrade[1];
 
-# Calculate if T1 or stop was hit on current bar to close the active trade
-def longT1Hit = activeTradeDirection == 1 and high >= extp1;
-def shortT1Hit = activeTradeDirection == -1 and low <= extn1;
-def longStopHit = activeTradeDirection == 1 and low <= (IBHigh - stopLossPoints);
-def shortStopHit = activeTradeDirection == -1 and high >= (IBLow + stopLossPoints);
-def tradeClosedThisBar = longT1Hit or shortT1Hit or longStopHit or shortStopHit;
+# Entry signals fire only when no active trade
+def longEntrySignal = rawLongEntry and inTrade[1] == 0;
+def shortEntrySignal = rawShortEntry and inTrade[1] == 0;
 
-# Track whether trade was closed (resets activeTradeDirection for next bar)
-rec tradeClosed = if firstBar or !pastOpeningRange then 1
-                  else if tradeClosedThisBar then 1
-                  else if activeTradeDirection != 0 and activeTradeDirection[1] == 0 then 0
-                  else tradeClosed[1];
+AddVerticalLine(longEntrySignal and pastOpeningRange and marketOpen, "Long", Color.GREEN, Curve.SHORT_DASH);
+AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short", Color.RED, Curve.SHORT_DASH);
 
-# Redefine activeTradeDirection to reset when trade is closed
-rec activeTradeDirection2 = if firstBar or !pastOpeningRange then 0
-                            else if tradeClosed[1] == 1 and rawLongEntry then 1
-                            else if tradeClosed[1] == 1 and rawShortEntry then -1
-                            else if tradeClosedThisBar then 0
-                            else activeTradeDirection2[1];
+# ========== Target and Stop Tracking for Bubbles ==========
+rec tradeDirection = if longEntrySignal then 1
+                     else if shortEntrySignal then -1
+                     else if firstBar then 0
+                     else tradeDirection[1];
 
-# Entry signals only fire when previous trade was closed (or no previous trade exists)
-def longEntrySignal = rawLongEntry and tradeClosed[1] == 1;
-def shortEntrySignal = rawShortEntry and tradeClosed[1] == 1;
+def newEntry = longEntrySignal or shortEntrySignal;
 
-# Vertical lines for entries
-AddVerticalLine(longEntrySignal and pastOpeningRange and marketOpen, "Long Triggered", Color.GREEN, Curve.SHORT_DASH);
-AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short Triggered", Color.RED, Curve.SHORT_DASH);
+rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
+             else if tradeDirection == -1 and low <= shortT1 then 1
+             else if newEntry or firstBar then 0
+             else t1_hit[1];
 
-# Trade state tracking for display purposes
-rec tradeState = if longEntrySignal then 1 else if shortEntrySignal then -1 else if firstBar then 0 else tradeState[1];
-def isNewSignal = longEntrySignal or shortEntrySignal;
+rec t2_hit = if tradeDirection == 1 and high >= longT2 then 1
+             else if tradeDirection == -1 and low <= shortT2 then 1
+             else if newEntry or firstBar then 0
+             else t2_hit[1];
 
-rec t1p_was_hit = if tradeState == 1 and high >= extp1 then 1 else if isNewSignal or firstBar then 0 else t1p_was_hit[1];
-rec t2p_was_hit = if tradeState == 1 and high >= extp2 then 1 else if isNewSignal or firstBar then 0 else t2p_was_hit[1];
-rec t1n_was_hit = if tradeState == -1 and low <= extn1 then 1 else if isNewSignal or firstBar then 0 else t1n_was_hit[1];
-rec t2n_was_hit = if tradeState == -1 and low <= extn2 then 1 else if isNewSignal or firstBar then 0 else t2n_was_hit[1];
+rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
+               else if tradeDirection == -1 and high >= shortStop then 1
+               else if newEntry or firstBar then 0
+               else stop_hit[1];
 
-rec anyTargetHit = if isNewSignal or firstBar then 0 else if t1p_was_hit or t2p_was_hit or t1n_was_hit or t2n_was_hit then 1 else anyTargetHit[1];
+# Bubble conditions
+def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1];
+def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1];
+def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
 
-def longStopCondition = tradeState == 1 and low <= (IBHigh - stopLossPoints);
-def shortStopCondition = tradeState == -1 and high >= (IBLow + stopLossPoints);
-rec stop_was_hit = if isNewSignal or firstBar then 0 else if (longStopCondition or shortStopCondition) and !anyTargetHit then 1 else stop_was_hit[1];
+AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1, high, "T2", Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1, low, "T2", Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1, low, "Stop", Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1, high, "Stop", Color.RED, yes);
 
-def plot_t1p_bubble = tradeState == 1 and high >= extp1 and !t1p_was_hit[1];
-def plot_t2p_bubble = tradeState == 1 and high >= extp2 and !t2p_was_hit[1];
-def plot_t1n_bubble = tradeState == -1 and low <= extn1 and !t1n_was_hit[1];
-def plot_t2n_bubble = tradeState == -1 and low <= extn2 and !t2n_was_hit[1];
-def plot_stop_bubble = (longStopCondition or shortStopCondition) and !anyTargetHit and !stop_was_hit[1];
+# ========== Active Stop Loss Lines ==========
+def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
+def showActiveShortStop = tradeDirection == -1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
 
-AddChartBubble(plot_t1p_bubble, high, "T1", Color.CYAN, yes);
-AddChartBubble(plot_t2p_bubble, high, "T2", Color.CYAN, yes);
-AddChartBubble(plot_t1n_bubble, low, "T1", Color.CYAN, no);
-AddChartBubble(plot_t2n_bubble, low, "T2", Color.CYAN, no);
-AddChartBubble(plot_stop_bubble and tradeState == 1, low, "Stop", Color.RED, no);
-AddChartBubble(plot_stop_bubble and tradeState == -1, high, "Stop", Color.RED, yes);
+plot ActiveLongStop = if showActiveLongStop then longStop else Double.NaN;
+plot ActiveShortStop = if showActiveShortStop then shortStop else Double.NaN;
+ActiveLongStop.SetDefaultColor(Color.RED);
+ActiveLongStop.SetStyle(Curve.SHORT_DASH);
+ActiveLongStop.SetLineWeight(2);
+ActiveShortStop.SetDefaultColor(Color.RED);
+ActiveShortStop.SetStyle(Curve.SHORT_DASH);
+ActiveShortStop.SetLineWeight(2);
 
-# Plot stop loss lines
-def showLongStop = tradeState == 1 and !t1p_was_hit and !stop_was_hit and pastOpeningRange and marketOpen;
-def showShortStop = tradeState == -1 and !t1n_was_hit and !stop_was_hit and pastOpeningRange and marketOpen;
-
-plot LongStop = if showLongStop then IBHigh - stopLossPoints else Double.NaN;
-plot ShortStop = if showShortStop then IBLow + stopLossPoints else Double.NaN;
-
-LongStop.SetDefaultColor(Color.RED);
-LongStop.SetStyle(Curve.SHORT_DASH);
-LongStop.SetLineWeight(2);
-ShortStop.SetDefaultColor(Color.RED);
-ShortStop.SetStyle(Curve.SHORT_DASH);
-ShortStop.SetLineWeight(2);
-
-input InitialBalance_Label = yes;
-
-# Store the last valid IB values for labels
+# ========== Labels ==========
 def labelIBHigh = if !IsNaN(IBH) then IBH else labelIBHigh[1];
 def labelIBLow = if !IsNaN(IBL) then IBL else labelIBLow[1];
-def labelORWidth = labelIBHigh - labelIBLow;
-def labelExtp1 = labelIBHigh + (labelORWidth * coeff1);
-def labelExtp2 = labelIBHigh + (labelORWidth * coeff2);
-def labelExtn1 = labelIBLow - (labelORWidth * coeff1);
-def labelExtn2 = labelIBLow - (labelORWidth * coeff2);
+def labelIBWidth = labelIBHigh - labelIBLow;
 
-AddLabel(InitialBalance_Label, "IB: " + Round(labelORWidth, 2), Color.CYAN);
-AddLabel(InitialBalance_Label, "Long T1: " + Round(labelExtp1, 2), Color.GREEN);
-AddLabel(InitialBalance_Label, "Long T2: " + Round(labelExtp2, 2), Color.GREEN);
-AddLabel(InitialBalance_Label, "Short T1: " + Round(labelExtn1, 2), Color.RED);
-AddLabel(InitialBalance_Label, "Short T2: " + Round(labelExtn2, 2), Color.RED);
+AddLabel(showLabels, "IB: " + Round(labelIBWidth, 2), Color.CYAN);
+AddLabel(showLabels, "ATR: " + Round(atr, 2), Color.CYAN);
+AddLabel(showLabels, "Long T1: " + Round(longT1, 2) + " | T2: " + Round(longT2, 2), Color.GREEN);
+AddLabel(showLabels, "Short T1: " + Round(shortT1, 2) + " | T2: " + Round(shortT2, 2), Color.RED);
