@@ -101,7 +101,8 @@ def shortStopCondition = tradeState == -1 and high >= (IBLow + stopLossPoints);
 rec stop_was_hit = if isNewSignal or firstBar then 0 else if (longStopCondition or shortStopCondition) and !anyTargetHit then 1 else stop_was_hit[1];
 
 # Track if there's an active trade (one that hasn't hit T1 or stop yet)
-rec hasActiveTrade = if firstBar then 0
+# Reset during opening range to ensure first signal of the day plots correctly
+rec hasActiveTrade = if firstBar or !pastOpeningRange then 0
                      else if t1p_was_hit or t1n_was_hit or stop_was_hit then 0
                      else if isNewSignal then 1
                      else hasActiveTrade[1];
