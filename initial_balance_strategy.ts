@@ -101,10 +101,9 @@ def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullish
 def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
 # Track if T1, T2, or stop was hit to determine if we can take new trades
-# Uses captured values to ensure consistency
 rec inTrade = if firstBar or !pastOpeningRange or !marketOpen then 0
-              else if (inTrade[1] == 1 and !IsNaN(entryT1[1]) and (high >= entryT1[1] or high >= entryT2[1] or low <= entryStopLevel[1])) then 0
-              else if (inTrade[1] == -1 and !IsNaN(entryT1[1]) and (low <= entryT1[1] or low <= entryT2[1] or high >= entryStopLevel[1])) then 0
+              else if (inTrade[1] == 1 and (high >= longT1 or high >= longT2 or low <= longStop)) then 0
+              else if (inTrade[1] == -1 and (low <= shortT1 or low <= shortT2 or high >= shortStop)) then 0
               else if rawLongEntry and inTrade[1] == 0 then 1
               else if rawShortEntry and inTrade[1] == 0 then -1
               else inTrade[1];
@@ -129,31 +128,25 @@ rec entryStopLevel = if newEntry then (if longEntrySignal then longStop else sho
                      else if firstBar or !marketOpen then Double.NaN
                      else entryStopLevel[1];
 
-# Capture target levels at entry - held constant throughout trade
-rec entryT1 = if newEntry then (if longEntrySignal then longT1 else shortT1)
-              else if firstBar or !marketOpen then Double.NaN
-              else entryT1[1];
-
-rec entryT2 = if newEntry then (if longEntrySignal then longT2 else shortT2)
-              else if firstBar or !marketOpen then Double.NaN
-              else entryT2[1];
-
-rec t1_hit = if !IsNaN(entryT1) and ((tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1)) then 1
+rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
+             else if tradeDirection == -1 and low <= shortT1 then 1
              else if newEntry or firstBar then 0
              else t1_hit[1];
 
-rec t2_hit = if !IsNaN(entryT2) and ((tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2)) then 1
+rec t2_hit = if tradeDirection == 1 and high >= longT2 then 1
+             else if tradeDirection == -1 and low <= shortT2 then 1
              else if newEntry or firstBar then 0
              else t2_hit[1];
 
-rec stop_hit = if !IsNaN(entryStopLevel) and ((tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel)) then 1
+rec stop_hit = if tradeDirection == 1 and low <= entryStopLevel then 1
+               else if tradeDirection == -1 and high >= entryStopLevel then 1
                else if newEntry or firstBar then 0
                else stop_hit[1];
 
-# Bubble conditions - use captured target levels
-def showT1Bubble = !IsNaN(entryT1) and ((tradeDirection == 1 and high >= entryT1) or (tradeDirection == -1 and low <= entryT1)) and !t1_hit[1] and !stop_hit;
-def showT2Bubble = !IsNaN(entryT2) and ((tradeDirection == 1 and high >= entryT2) or (tradeDirection == -1 and low <= entryT2)) and !t2_hit[1] and !stop_hit;
-def showStopBubble = !IsNaN(entryStopLevel) and ((tradeDirection == 1 and low <= entryStopLevel) or (tradeDirection == -1 and high >= entryStopLevel)) and !t1_hit and !stop_hit[1];
+# Bubble conditions - only show if trade is active (stop hasn't been hit)
+def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1] and !stop_hit;
+def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
+def showStopBubble = (tradeDirection == 1 and low <= entryStopLevel or tradeDirection == -1 and high >= entryStopLevel) and !t1_hit and !stop_hit[1];
 
 AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1", Color.CYAN, yes);
 AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1", Color.CYAN, no);
