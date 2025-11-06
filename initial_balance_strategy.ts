@@ -119,19 +119,19 @@ rec tradeDirection = if longEntrySignal then 1
 
 def newEntry = longEntrySignal or shortEntrySignal;
 
-rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
+rec t1_hit = if newEntry or firstBar then 0
+             else if tradeDirection == 1 and high >= longT1 then 1
              else if tradeDirection == -1 and low <= shortT1 then 1
-             else if newEntry or firstBar then 0
              else t1_hit[1];
 
-rec t2_hit = if tradeDirection == 1 and high >= longT2 then 1
+rec t2_hit = if newEntry or firstBar then 0
+             else if tradeDirection == 1 and high >= longT2 then 1
              else if tradeDirection == -1 and low <= shortT2 then 1
-             else if newEntry or firstBar then 0
              else t2_hit[1];
 
-rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
+rec stop_hit = if newEntry or firstBar then 0
+               else if tradeDirection == 1 and low <= longStop then 1
                else if tradeDirection == -1 and high >= shortStop then 1
-               else if newEntry or firstBar then 0
                else stop_hit[1];
 
 # Bubble conditions - only show if trade is active (stop hasn't been hit)
@@ -139,12 +139,12 @@ def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == 
 def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
 def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, high, "T1", Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, low, "T1", Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, high, "T2", Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, low, "T2", Color.CYAN, no);
-AddChartBubble(showStopBubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, low, "Stop", Color.RED, no);
-AddChartBubble(showStopBubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, high, "Stop", Color.RED, yes);
+AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1, high, "T2", Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1, low, "T2", Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1, low, "Stop", Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1, high, "Stop", Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
 def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
@@ -168,3 +168,7 @@ AddLabel(showLabels, "IB: " + Round(labelIBWidth, 2), Color.CYAN);
 AddLabel(showLabels, "ATR: " + Round(atr, 2), Color.CYAN);
 AddLabel(showLabels, "Long T1: " + Round(longT1, 2) + " | T2: " + Round(longT2, 2), Color.GREEN);
 AddLabel(showLabels, "Short T1: " + Round(shortT1, 2) + " | T2: " + Round(shortT2, 2), Color.RED);
+
+# Debug labels
+AddLabel(showLabels, "TradeDir: " + tradeDirection, if tradeDirection == 1 then Color.GREEN else if tradeDirection == -1 then Color.RED else Color.GRAY);
+AddLabel(showLabels, "T1_Hit: " + t1_hit + " | T2_Hit: " + t2_hit + " | Stop_Hit: " + stop_hit, if stop_hit then Color.RED else if t1_hit or t2_hit then Color.CYAN else Color.GRAY);
