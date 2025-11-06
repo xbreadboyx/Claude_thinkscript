@@ -139,12 +139,12 @@ def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == 
 def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
 def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1, high, "T2", Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1, low, "T2", Color.CYAN, no);
-AddChartBubble(showStopBubble and tradeDirection == 1, low, "Stop", Color.RED, no);
-AddChartBubble(showStopBubble and tradeDirection == -1, high, "Stop", Color.RED, yes);
+AddChartBubble(showT1Bubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, high, "T1", Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, low, "T1", Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, high, "T2", Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, low, "T2", Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1 and shouldPlot and pastOpeningRange and marketOpen, low, "Stop", Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1 and shouldPlot and pastOpeningRange and marketOpen, high, "Stop", Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
 def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
