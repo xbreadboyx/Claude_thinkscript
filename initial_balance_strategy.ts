@@ -1,6 +1,8 @@
 # Initial Balance Trading Strategy with ATR-Based Targets
-# Clean, optimized version with efficient trade filtering
+# Trades IB breakouts with ATR-based profit targets and stops
+# Optimized for efficiency with proper recursive variable management
 
+# ========== Input Parameters ==========
 input showOnlyToday = yes;
 input InitialBalanceMinutes = 60;
 input Market_Open_Time = 0930;
@@ -14,6 +16,7 @@ input emaFast = 8;
 input emaMedium = 21;
 input emaSlow = 34;
 input showLabels = yes;
+input showDebugLabels = no;
 
 # ========== Time and Session Management ==========
 def day = GetDay();
@@ -26,14 +29,17 @@ def firstBar = day[1] != day;
 def secondsFromOpen = SecondsFromTime(Market_Open_Time);
 def pastOpeningRange = secondsFromOpen >= InitialBalanceMinutes * 60;
 
+# Common condition for plotting IB levels and targets
+def plotCondition = pastOpeningRange and marketOpen and shouldPlot;
+
 # ========== Initial Balance Calculation ==========
 rec displayedHigh = if !marketOpen or firstBar then high else Max(high, displayedHigh[1]);
 rec displayedLow = if !marketOpen or firstBar then low else Min(low, displayedLow[1]);
 rec IBHigh = if pastOpeningRange then IBHigh[1] else displayedHigh;
 rec IBLow = if pastOpeningRange then IBLow[1] else displayedLow;
 
-plot IBH = if pastOpeningRange and marketOpen and shouldPlot then IBHigh else Double.NaN;
-plot IBL = if pastOpeningRange and marketOpen and shouldPlot then IBLow else Double.NaN;
+plot IBH = if plotCondition then IBHigh else Double.NaN;
+plot IBL = if plotCondition then IBLow else Double.NaN;
 IBH.SetDefaultColor(Color.MAGENTA);
 IBH.SetStyle(Curve.SHORT_DASH);
 IBH.SetLineWeight(2);
@@ -42,7 +48,7 @@ IBL.SetStyle(Curve.SHORT_DASH);
 IBL.SetLineWeight(2);
 AddCloud(IBH, IBL, Color.LIGHT_GRAY, Color.LIGHT_GRAY);
 
-plot Mid = if pastOpeningRange and marketOpen and shouldPlot then (IBH + IBL) / 2 else Double.NaN;
+plot Mid = if plotCondition then (IBH + IBL) / 2 else Double.NaN;
 Mid.SetDefaultColor(Color.MAGENTA);
 Mid.SetStyle(Curve.SHORT_DASH);
 Mid.SetLineWeight(1);
@@ -56,10 +62,10 @@ def shortT2 = IBLow - (atr * atrMultiplierT2);
 def longStop = IBHigh - (atr * stopLossATRMultiplier);
 def shortStop = IBLow + (atr * stopLossATRMultiplier);
 
-plot LongTarget1 = if pastOpeningRange and marketOpen and shouldPlot then longT1 else Double.NaN;
-plot LongTarget2 = if pastOpeningRange and marketOpen and shouldPlot then longT2 else Double.NaN;
-plot ShortTarget1 = if pastOpeningRange and marketOpen and shouldPlot then shortT1 else Double.NaN;
-plot ShortTarget2 = if pastOpeningRange and marketOpen and shouldPlot then shortT2 else Double.NaN;
+plot LongTarget1 = if plotCondition then longT1 else Double.NaN;
+plot LongTarget2 = if plotCondition then longT2 else Double.NaN;
+plot ShortTarget1 = if plotCondition then shortT1 else Double.NaN;
+plot ShortTarget2 = if plotCondition then shortT2 else Double.NaN;
 
 LongTarget1.SetDefaultColor(Color.CYAN);
 LongTarget2.SetDefaultColor(Color.CYAN);
@@ -96,7 +102,9 @@ EMA_Slow.SetLineWeight(1);
 def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
 def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
-# Track if T1 or stop was hit to determine if we can take new trades
+# Track trade state: 0 = no trade, 1 = long, -1 = short
+# Exit logic: Trade exits when T1 or stop is hit, allowing new entries
+# This prevents multiple signals per day while managing risk
 rec inTrade = if firstBar or !pastOpeningRange then 0
               else if (inTrade[1] == 1 and (high >= longT1 or low <= longStop)) then 0
               else if (inTrade[1] == -1 and (low <= shortT1 or high >= shortStop)) then 0
@@ -134,10 +142,13 @@ rec stop_hit = if newEntry or firstBar then 0
                else if tradeDirection == -1 and high >= shortStop then 1
                else stop_hit[1];
 
-# Bubble conditions - only show if trade is active (stop hasn't been hit)
-def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1] and !stop_hit;
-def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
-def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
+# Bubble conditions - only show first time each level is hit
+# Using [1] lookback prevents bubbles from showing on already-hit levels
+# T1/T2: Check !t1_hit[1]/!t2_hit[1] (previous bar) to catch current bar hits
+# Stop: Check !t1_hit (current) to avoid showing if T1 hit first, !stop_hit[1] (previous) to catch current hit
+def showT1Bubble = ((tradeDirection == 1 and high >= longT1) or (tradeDirection == -1 and low <= shortT1)) and !t1_hit[1] and !stop_hit;
+def showT2Bubble = ((tradeDirection == 1 and high >= longT2) or (tradeDirection == -1 and low <= shortT2)) and !t2_hit[1] and !stop_hit;
+def showStopBubble = ((tradeDirection == 1 and low <= longStop) or (tradeDirection == -1 and high >= shortStop)) and !t1_hit and !stop_hit[1];
 
 AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
 AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
@@ -169,6 +180,6 @@ AddLabel(showLabels, "ATR: " + Round(atr, 2), Color.CYAN);
 AddLabel(showLabels, "Long T1: " + Round(longT1, 2) + " | T2: " + Round(longT2, 2), Color.GREEN);
 AddLabel(showLabels, "Short T1: " + Round(shortT1, 2) + " | T2: " + Round(shortT2, 2), Color.RED);
 
-# Debug labels
-AddLabel(showLabels, "TradeDir: " + tradeDirection, if tradeDirection == 1 then Color.GREEN else if tradeDirection == -1 then Color.RED else Color.GRAY);
-AddLabel(showLabels, "T1_Hit: " + t1_hit + " | T2_Hit: " + t2_hit + " | Stop_Hit: " + stop_hit, if stop_hit then Color.RED else if t1_hit or t2_hit then Color.CYAN else Color.GRAY);
+# Debug labels - useful for troubleshooting trade state
+AddLabel(showDebugLabels, "TradeDir: " + tradeDirection, if tradeDirection == 1 then Color.GREEN else if tradeDirection == -1 then Color.RED else Color.GRAY);
+AddLabel(showDebugLabels, "T1_Hit: " + t1_hit + " | T2_Hit: " + t2_hit + " | Stop_Hit: " + stop_hit, if stop_hit then Color.RED else if t1_hit or t2_hit then Color.CYAN else Color.GRAY);
