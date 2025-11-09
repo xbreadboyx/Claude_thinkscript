@@ -13,6 +13,7 @@ input sessionEndTime = 1600;            # RTH session end (EST)
 input avoidFirstMinutes = 30;           # Minutes to avoid after session open
 input avoidLastMinutes = 30;            # Minutes to avoid before session close
 input showLabels = YES;                 # Show status labels
+input bubbleOffset = 0.5;               # Percentage offset for bubbles from price (0.5 = 0.5%)
 
 # ========== Time Filter ==========
 def secondsFromStart = SecondsFromTime(sessionStartTime);
@@ -64,18 +65,25 @@ def momentumTurnUpRecent = Sum(momentumTurnUp, confluenceWindow) > 0;
 def momentumTurnDownRecent = Sum(momentumTurnDown, confluenceWindow) > 0;
 
 # Confluence occurs when both signals are recent AND one just fired
-def confluenceBuy = (priceReversalBuy and momentumTurnUpRecent) or
-                    (momentumTurnUp and priceReversalBuyRecent);
+def confluenceBuyRaw = (priceReversalBuy and momentumTurnUpRecent) or
+                       (momentumTurnUp and priceReversalBuyRecent);
 
-def confluenceSell = (priceReversalSell and momentumTurnDownRecent) or
-                     (momentumTurnDown and priceReversalSellRecent);
+def confluenceSellRaw = (priceReversalSell and momentumTurnDownRecent) or
+                        (momentumTurnDown and priceReversalSellRecent);
 
-# Prevent duplicate signals - only fire once per confluence event
-rec lastConfluenceBuy = if confluenceBuy then BarNumber() else lastConfluenceBuy[1];
-rec lastConfluenceSell = if confluenceSell then BarNumber() else lastConfluenceSell[1];
+# Prevent duplicate signals - only fire ONCE per confluence event
+# Track if we've already signaled this confluence
+rec confluenceBuySignaled = if confluenceBuyRaw and !confluenceBuySignaled[1] then 1
+                            else if !confluenceBuyRaw and !priceReversalBuyRecent and !momentumTurnUpRecent then 0
+                            else confluenceBuySignaled[1];
 
-def uniqueConfluenceBuy = confluenceBuy and lastConfluenceBuy[1] != BarNumber();
-def uniqueConfluenceSell = confluenceSell and lastConfluenceSell[1] != BarNumber();
+rec confluenceSellSignaled = if confluenceSellRaw and !confluenceSellSignaled[1] then 1
+                             else if !confluenceSellRaw and !priceReversalSellRecent and !momentumTurnDownRecent then 0
+                             else confluenceSellSignaled[1];
+
+# Only trigger on the first bar of confluence
+def uniqueConfluenceBuy = confluenceBuyRaw and !confluenceBuySignaled[1];
+def uniqueConfluenceSell = confluenceSellRaw and !confluenceSellSignaled[1];
 
 # Final signals with time filter
 def finalBuySignal = uniqueConfluenceBuy and allowTrading;
@@ -116,8 +124,13 @@ ConfluenceSellSignal.SetDefaultColor(Color.RED);
 ConfluenceSellSignal.SetLineWeight(5);
 
 # ========== Chart Bubbles for Confluence Signals ==========
-AddChartBubble(finalBuySignal, low, "BUY\nCONFLUENCE", Color.GREEN, no);
-AddChartBubble(finalSellSignal, high, "SELL\nCONFLUENCE", Color.RED, yes);
+# Calculate bubble offset to keep them away from price action
+def priceOffset = close * (bubbleOffset / 100);
+def buyBubblePrice = low - priceOffset;
+def sellBubblePrice = high + priceOffset;
+
+AddChartBubble(finalBuySignal, buyBubblePrice, "BUY\nCONFLUENCE", Color.GREEN, no);
+AddChartBubble(finalSellSignal, sellBubblePrice, "SELL\nCONFLUENCE", Color.RED, yes);
 
 # ========== Alerts ==========
 Alert(finalBuySignal, "CONFLUENCE BUY SIGNAL", Alert.BAR, Sound.Bell);
