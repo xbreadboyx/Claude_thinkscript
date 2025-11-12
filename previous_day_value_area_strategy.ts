@@ -79,32 +79,52 @@ PrevDayPOC.SetLineWeight(2);
 
 AddCloud(PrevDayVAH, PrevDayVAL, Color.LIGHT_GRAY, Color.LIGHT_GRAY);
 
-# ========== ATR-Based Targets ==========
+# ========== Opening Price Logic ==========
+# Capture the opening price at market open
+def secondsFromOpen = SecondsFromTime(Market_Open_Time);
+def isFirstBarOfDay = secondsFromOpen >= 0 and secondsFromOpen[1] < 0;
+
+rec openingPrice = if isFirstBarOfDay then open
+                   else if firstBar then open
+                   else openingPrice[1];
+
+# Determine opening position relative to value area
+rec openedAboveVA = if isFirstBarOfDay then (openingPrice > VAH)
+                    else if firstBar then 0
+                    else openedAboveVA[1];
+
+rec openedBelowVA = if isFirstBarOfDay then (openingPrice < VAL)
+                    else if firstBar then 0
+                    else openedBelowVA[1];
+
+rec openedWithinVA = if isFirstBarOfDay then (openingPrice >= VAL and openingPrice <= VAH)
+                     else if firstBar then 0
+                     else openedWithinVA[1];
+
+# No trade condition - plot at market open if opened within VA
+def noTradeCondition = isFirstBarOfDay and openedWithinVA;
+AddVerticalLine(noTradeCondition and marketOpen, "No Trade", Color.GRAY, Curve.SHORT_DASH);
+
+# ========== Targets Based on Value Area ==========
+# Long target = VAH (top of value area)
+# Short target = VAL (bottom of value area)
 def atr = ATR(length = atrPeriod);
-def longT1 = VAH + (atr * atrMultiplierT1);
-def longT2 = VAH + (atr * atrMultiplierT2);
-def shortT1 = VAL - (atr * atrMultiplierT1);
-def shortT2 = VAL - (atr * atrMultiplierT2);
-def longStop = VAH - (atr * stopLossATRMultiplier);
-def shortStop = VAL + (atr * stopLossATRMultiplier);
+def longTarget = VAH;
+def shortTarget = VAL;
 
-plot LongTarget1 = if marketOpen and shouldPlot then longT1 else Double.NaN;
-plot LongTarget2 = if marketOpen and shouldPlot then longT2 else Double.NaN;
-plot ShortTarget1 = if marketOpen and shouldPlot then shortT1 else Double.NaN;
-plot ShortTarget2 = if marketOpen and shouldPlot then shortT2 else Double.NaN;
+# ATR-based stops
+def longStop = VAL - (atr * stopLossATRMultiplier);
+def shortStop = VAH + (atr * stopLossATRMultiplier);
 
-LongTarget1.SetDefaultColor(Color.CYAN);
-LongTarget2.SetDefaultColor(Color.CYAN);
-ShortTarget1.SetDefaultColor(Color.CYAN);
-ShortTarget2.SetDefaultColor(Color.CYAN);
-LongTarget1.SetStyle(Curve.SHORT_DASH);
-LongTarget2.SetStyle(Curve.SHORT_DASH);
-ShortTarget1.SetStyle(Curve.SHORT_DASH);
-ShortTarget2.SetStyle(Curve.SHORT_DASH);
-LongTarget1.SetLineWeight(1);
-LongTarget2.SetLineWeight(1);
-ShortTarget1.SetLineWeight(1);
-ShortTarget2.SetLineWeight(1);
+plot LongTargetLine = if marketOpen and shouldPlot then longTarget else Double.NaN;
+plot ShortTargetLine = if marketOpen and shouldPlot then shortTarget else Double.NaN;
+
+LongTargetLine.SetDefaultColor(Color.CYAN);
+ShortTargetLine.SetDefaultColor(Color.CYAN);
+LongTargetLine.SetStyle(Curve.LONG_DASH);
+ShortTargetLine.SetStyle(Curve.LONG_DASH);
+LongTargetLine.SetLineWeight(2);
+ShortTargetLine.SetLineWeight(2);
 
 # ========== EMA Trend Filter ==========
 def ema1 = ExpAverage(close, emaFast);
@@ -124,29 +144,41 @@ EMA_Medium.SetLineWeight(1);
 EMA_Slow.SetLineWeight(1);
 
 # ========== Entry Signal Logic ==========
-# Entry conditions: breakout above VAH (long) or below VAL (short)
-def rawLongEntry = close > VAH and close[1] <= VAH and (!useEMAFilter or bullishStack);
-def rawShortEntry = close < VAL and close[1] >= VAL and (!useEMAFilter or bearishStack);
+# Mean reversion strategy:
+# If opened above VAH → Wait for price to break below VAH and close within VA → SHORT
+# If opened below VAL → Wait for price to break above VAL and close within VA → LONG
 
-# Additional strategy: reversion to POC
-# Can add mean reversion trades when price is far from POC
-def farAbovePOC = close > VAH and close > POC;
-def farBelowPOC = close < VAL and close < POC;
+# Check if price is within value area
+def priceInVA = close >= VAL and close <= VAH;
 
-# Track if T1 or stop was hit to determine if we can take new trades
-rec inTrade = if firstBar then 0
-              else if (inTrade[1] == 1 and (high >= longT1 or low <= longStop)) then 0
-              else if (inTrade[1] == -1 and (low <= shortT1 or high >= shortStop)) then 0
+# Long entry: Opened below VAL, price breaks back up through VAL and closes within VA
+def rawLongEntry = openedBelowVA and
+                   close > VAL and
+                   priceInVA and
+                   close[1] <= VAL and
+                   (!useEMAFilter or bullishStack);
+
+# Short entry: Opened above VAH, price breaks back down through VAH and closes within VA
+def rawShortEntry = openedAboveVA and
+                    close < VAH and
+                    priceInVA and
+                    close[1] >= VAH and
+                    (!useEMAFilter or bearishStack);
+
+# Track if target or stop was hit to determine if we can take new trades
+rec inTrade = if firstBar or !marketOpen then 0
+              else if (inTrade[1] == 1 and (high >= longTarget or low <= longStop)) then 0
+              else if (inTrade[1] == -1 and (low <= shortTarget or high >= shortStop)) then 0
               else if rawLongEntry and inTrade[1] == 0 then 1
               else if rawShortEntry and inTrade[1] == 0 then -1
               else inTrade[1];
 
-# Entry signals fire only when no active trade
-def longEntrySignal = rawLongEntry and inTrade[1] == 0;
-def shortEntrySignal = rawShortEntry and inTrade[1] == 0;
+# Entry signals fire only when no active trade and not in no-trade condition
+def longEntrySignal = rawLongEntry and inTrade[1] == 0 and !openedWithinVA;
+def shortEntrySignal = rawShortEntry and inTrade[1] == 0 and !openedWithinVA;
 
-AddVerticalLine(longEntrySignal and marketOpen, "Long", Color.GREEN, Curve.SHORT_DASH);
-AddVerticalLine(shortEntrySignal and marketOpen, "Short", Color.RED, Curve.SHORT_DASH);
+AddVerticalLine(longEntrySignal and marketOpen, "Long Entry", Color.GREEN, Curve.SHORT_DASH);
+AddVerticalLine(shortEntrySignal and marketOpen, "Short Entry", Color.RED, Curve.SHORT_DASH);
 
 # ========== Target and Stop Tracking for Bubbles ==========
 rec tradeDirection = if longEntrySignal then 1
@@ -156,15 +188,10 @@ rec tradeDirection = if longEntrySignal then 1
 
 def newEntry = longEntrySignal or shortEntrySignal;
 
-rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
-             else if tradeDirection == -1 and low <= shortT1 then 1
-             else if newEntry or firstBar then 0
-             else t1_hit[1];
-
-rec t2_hit = if tradeDirection == 1 and high >= longT2 then 1
-             else if tradeDirection == -1 and low <= shortT2 then 1
-             else if newEntry or firstBar then 0
-             else t2_hit[1];
+rec target_hit = if tradeDirection == 1 and high >= longTarget then 1
+                 else if tradeDirection == -1 and low <= shortTarget then 1
+                 else if newEntry or firstBar then 0
+                 else target_hit[1];
 
 rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
                else if tradeDirection == -1 and high >= shortStop then 1
@@ -172,20 +199,17 @@ rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
                else stop_hit[1];
 
 # Bubble conditions - only show if trade is active (stop hasn't been hit)
-def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1] and !stop_hit;
-def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
-def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
+def showTargetBubble = (tradeDirection == 1 and high >= longTarget or tradeDirection == -1 and low <= shortTarget) and !target_hit[1] and !stop_hit;
+def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !target_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1, high, "T2", Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1, low, "T2", Color.CYAN, no);
+AddChartBubble(showTargetBubble and tradeDirection == 1, high, "Target", Color.CYAN, yes);
+AddChartBubble(showTargetBubble and tradeDirection == -1, low, "Target", Color.CYAN, no);
 AddChartBubble(showStopBubble and tradeDirection == 1, low, "Stop", Color.RED, no);
 AddChartBubble(showStopBubble and tradeDirection == -1, high, "Stop", Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
-def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and marketOpen;
-def showActiveShortStop = tradeDirection == -1 and !t1_hit and !stop_hit and marketOpen;
+def showActiveLongStop = tradeDirection == 1 and !target_hit and !stop_hit and marketOpen;
+def showActiveShortStop = tradeDirection == -1 and !target_hit and !stop_hit and marketOpen;
 
 plot ActiveLongStop = if showActiveLongStop then longStop else Double.NaN;
 plot ActiveShortStop = if showActiveShortStop then shortStop else Double.NaN;
@@ -202,8 +226,17 @@ def labelVAL = if !IsNaN(PrevDayVAL) then PrevDayVAL else labelVAL[1];
 def labelPOC = if !IsNaN(PrevDayPOC) then PrevDayPOC else labelPOC[1];
 def labelVAWidth = labelVAH - labelVAL;
 
-AddLabel(showLabels, "Prev Day VA: " + Round(labelVAWidth, 2), Color.CYAN);
+# Opening status label
+def openStatus = if openedAboveVA then 1
+                 else if openedBelowVA then -1
+                 else if openedWithinVA then 0
+                 else Double.NaN;
+
+AddLabel(showLabels, "Prev Day VA Width: " + Round(labelVAWidth, 2), Color.CYAN);
 AddLabel(showLabels, "VAH: " + Round(labelVAH, 2) + " | POC: " + Round(labelPOC, 2) + " | VAL: " + Round(labelVAL, 2), Color.MAGENTA);
+AddLabel(showLabels and openStatus == 1, "Opened Above VA - Looking for SHORT", Color.ORANGE);
+AddLabel(showLabels and openStatus == -1, "Opened Below VA - Looking for LONG", Color.LIGHT_GREEN);
+AddLabel(showLabels and openStatus == 0, "Opened Within VA - NO TRADE", Color.GRAY);
 AddLabel(showLabels, "ATR: " + Round(atr, 2), Color.CYAN);
-AddLabel(showLabels, "Long T1: " + Round(longT1, 2) + " | T2: " + Round(longT2, 2), Color.GREEN);
-AddLabel(showLabels, "Short T1: " + Round(shortT1, 2) + " | T2: " + Round(shortT2, 2), Color.RED);
+AddLabel(showLabels, "Long Target: " + Round(longTarget, 2) + " | Stop: " + Round(longStop, 2), Color.GREEN);
+AddLabel(showLabels, "Short Target: " + Round(shortTarget, 2) + " | Stop: " + Round(shortStop, 2), Color.RED);
