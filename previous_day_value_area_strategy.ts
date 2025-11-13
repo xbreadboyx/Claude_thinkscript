@@ -27,38 +27,84 @@ def firstBar = day[1] != day;
 def isPreviousDay = day == GetLastDay() - 1;
 
 # ========== Previous Day Value Area Calculation ==========
-# We'll use a simplified volume profile approach
-# Calculate the previous day's high, low, and volume distribution
+# Calculate volume-based value area using volume profile methodology
+# Value Area = price range containing 70% of previous day's volume
+# POC = Point of Control (price level with highest volume)
 
-def aggPeriod = AggregationPeriod.DAY;
-def prevDayHigh = high(period = aggPeriod)[1];
-def prevDayLow = low(period = aggPeriod)[1];
-def prevDayClose = close(period = aggPeriod)[1];
-def prevDayVolume = volume(period = aggPeriod)[1];
+# Get previous day's high, low, and total volume
+def prevHigh = high(period = "DAY")[1];
+def prevLow = low(period = "DAY")[1];
+def prevClose = close(period = "DAY")[1];
+def prevTotalVol = volume(period = "DAY")[1];
+def prevRange = prevHigh - prevLow;
 
-# For a more accurate value area, we'll use TPO-style calculation
-# Approximate POC as the price level with most time/volume spent
-# Value Area as the range containing 70% of volume around POC
+# Use VWAP as POC approximation (volume-weighted average price)
+# VWAP represents the average price weighted by volume - close to true POC
+def prevVWAP = vwap(period = "DAY")[1];
 
-# Simplified approach: Use the middle 70% of previous day's range
-# More sophisticated: weight by volume at each price level
-def prevDayRange = prevDayHigh - prevDayLow;
-def prevDayMidpoint = (prevDayHigh + prevDayLow) / 2;
+# Build a volume profile by analyzing intraday volume distribution
+# We'll calculate volume at different price levels relative to the previous day
+# Since we can't store arrays, we'll use a statistical approach
 
-# Calculate POC as a weighted average based on VWAP concept for previous day
-def prevDayVWAP = vwap(period = aggPeriod)[1];
+# Key insight: For a normal volume distribution, ~68% of volume is within 1 std dev
+# To capture 70% of volume, we need slightly more than 1 std dev
+# Market profile studies show value area is typically 0.85-1.0 of the range
 
-# Value Area High and Low (70% of range centered around POC/VWAP)
-# Standard value area is typically 70% of volume, we'll approximate with range
-def valueAreaWidth = prevDayRange * (valueAreaPercentage / 100);
-def prevVAH = prevDayVWAP + (valueAreaWidth / 2);
-def prevVAL = prevDayVWAP - (valueAreaWidth / 2);
-def prevPOC = prevDayVWAP;
+# Calculate volume distribution metrics by looking at bars from previous day
+# Sum volume in different segments of the price range
+def lookbackPeriod = 390; # Approximately one trading day in minutes (6.5 hours)
 
-# Ensure VAH doesn't exceed previous day high and VAL doesn't go below previous day low
-def VAH = Min(prevVAH, prevDayHigh);
-def VAL = Max(prevVAL, prevDayLow);
-def POC = prevPOC;
+# For a more accurate calculation, divide the range into thirds and estimate volume distribution
+# High third, middle third, low third
+def upperThird = prevHigh - (prevRange / 3);
+def lowerThird = prevLow + (prevRange / 3);
+
+# Calculate volume in each third by summing bars that fell in those ranges
+# This is a simplified approach to approximate volume concentration
+# Reset counters at start of each day, accumulate only during previous day bars
+rec volUpperThird = if firstBar then 0
+                    else if GetDay() == GetLastDay() - 1 and close >= upperThird then volUpperThird[1] + volume
+                    else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+                    else volUpperThird[1];
+
+rec volMiddleThird = if firstBar then 0
+                     else if GetDay() == GetLastDay() - 1 and close < upperThird and close > lowerThird then volMiddleThird[1] + volume
+                     else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+                     else volMiddleThird[1];
+
+rec volLowerThird = if firstBar then 0
+                    else if GetDay() == GetLastDay() - 1 and close <= lowerThird then volLowerThird[1] + volume
+                    else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+                    else volLowerThird[1];
+
+# POC is in the third with the most volume
+def pocInUpper = volUpperThird > volMiddleThird and volUpperThird > volLowerThird;
+def pocInMiddle = volMiddleThird >= volUpperThird and volMiddleThird >= volLowerThird;
+def pocInLower = volLowerThird > volUpperThird and volLowerThird > volMiddleThird;
+
+# Adjust value area based on where most volume traded
+# If volume is concentrated in upper/lower third, shift value area accordingly
+def volumeImbalance = (volUpperThird - volLowerThird) / prevTotalVol;
+
+# Value area should capture 70% of volume
+# Start from VWAP (volume-weighted center) and expand to capture 70% of volume
+# Use an adaptive width based on volume distribution
+def baseVAWidth = prevRange * 0.70; # Start with 70% of range as baseline
+
+# Adjust width based on volume concentration
+# If volume is more concentrated (in one third), value area is narrower
+# If volume is more dispersed, value area is wider
+def volConcentration = Max(volUpperThird, Max(volMiddleThird, volLowerThird)) / prevTotalVol;
+def adjustmentFactor = if volConcentration > 0.50 then 0.85 else 1.0; # Narrow if concentrated
+
+def finalVAWidth = baseVAWidth * adjustmentFactor;
+
+# Center value area on VWAP but shift slightly based on volume imbalance
+def vaBias = volumeImbalance * (prevRange * 0.10); # Shift up to 10% of range
+
+def VAH = Min(prevVWAP + (finalVAWidth / 2) + vaBias, prevHigh);
+def VAL = Max(prevVWAP - (finalVAWidth / 2) + vaBias, prevLow);
+def POC = prevVWAP;
 
 # Plot previous day value area levels
 plot PrevDayVAH = if marketOpen and shouldPlot then VAH else Double.NaN;
@@ -234,6 +280,14 @@ def openStatus = if openedAboveVA then 1
 
 AddLabel(showLabels, "Prev Day VA Width: " + Round(labelVAWidth, 2), Color.CYAN);
 AddLabel(showLabels, "VAH: " + Round(labelVAH, 2) + " | POC: " + Round(labelPOC, 2) + " | VAL: " + Round(labelVAL, 2), Color.MAGENTA);
+
+# Show volume distribution for verification
+def totalVolTracked = volUpperThird + volMiddleThird + volLowerThird;
+def upperPct = if totalVolTracked > 0 then Round((volUpperThird / totalVolTracked) * 100, 0) else 0;
+def middlePct = if totalVolTracked > 0 then Round((volMiddleThird / totalVolTracked) * 100, 0) else 0;
+def lowerPct = if totalVolTracked > 0 then Round((volLowerThird / totalVolTracked) * 100, 0) else 0;
+
+AddLabel(showLabels, "Vol Dist - Upper: " + upperPct + "% Mid: " + middlePct + "% Lower: " + lowerPct + "%", Color.LIGHT_GRAY);
 AddLabel(showLabels and openStatus == 1, "Opened Above VA - Looking for SHORT", Color.ORANGE);
 AddLabel(showLabels and openStatus == -1, "Opened Below VA - Looking for LONG", Color.LIGHT_GREEN);
 AddLabel(showLabels and openStatus == 0, "Opened Within VA - NO TRADE", Color.GRAY);
