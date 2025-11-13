@@ -14,6 +14,7 @@ input emaFast = 8;
 input emaMedium = 21;
 input emaSlow = 34;
 input showLabels = yes;
+input bubbleOffsetATR = 0.3;
 
 # ========== Time and Session Management ==========
 def day = GetDay();
@@ -56,6 +57,9 @@ def shortT2 = IBLow - (atr * atrMultiplierT2);
 def longStop = IBHigh - (atr * stopLossATRMultiplier);
 def shortStop = IBLow + (atr * stopLossATRMultiplier);
 
+# Bubble vertical offset to avoid blocking price action
+def bubbleOffset = atr * bubbleOffsetATR;
+
 plot LongTarget1 = if pastOpeningRange and marketOpen and shouldPlot then longT1 else Double.NaN;
 plot LongTarget2 = if pastOpeningRange and marketOpen and shouldPlot then longT2 else Double.NaN;
 plot ShortTarget1 = if pastOpeningRange and marketOpen and shouldPlot then shortT1 else Double.NaN;
@@ -96,10 +100,10 @@ EMA_Slow.SetLineWeight(1);
 def rawLongEntry = close > IBH and close[1] <= IBH and (!useEMAFilter or bullishStack);
 def rawShortEntry = close < IBL and close[1] >= IBL and (!useEMAFilter or bearishStack);
 
-# Track if T1 or stop was hit to determine if we can take new trades
-rec inTrade = if firstBar or !pastOpeningRange then 0
-              else if (inTrade[1] == 1 and (high >= longT1 or low <= longStop)) then 0
-              else if (inTrade[1] == -1 and (low <= shortT1 or high >= shortStop)) then 0
+# Track if T1, T2, or stop was hit to determine if we can take new trades
+rec inTrade = if firstBar or !pastOpeningRange or !marketOpen then 0
+              else if (inTrade[1] == 1 and (high >= longT1 or high >= longT2 or low <= longStop)) then 0
+              else if (inTrade[1] == -1 and (low <= shortT1 or low <= shortT2 or high >= shortStop)) then 0
               else if rawLongEntry and inTrade[1] == 0 then 1
               else if rawShortEntry and inTrade[1] == 0 then -1
               else inTrade[1];
@@ -114,10 +118,15 @@ AddVerticalLine(shortEntrySignal and pastOpeningRange and marketOpen, "Short", C
 # ========== Target and Stop Tracking for Bubbles ==========
 rec tradeDirection = if longEntrySignal then 1
                      else if shortEntrySignal then -1
-                     else if firstBar then 0
+                     else if firstBar or !marketOpen then 0
                      else tradeDirection[1];
 
 def newEntry = longEntrySignal or shortEntrySignal;
+
+# Capture actual stop level at entry - held constant throughout trade
+rec entryStopLevel = if newEntry then (if longEntrySignal then longStop else shortStop)
+                     else if firstBar or !marketOpen then Double.NaN
+                     else entryStopLevel[1];
 
 rec t1_hit = if tradeDirection == 1 and high >= longT1 then 1
              else if tradeDirection == -1 and low <= shortT1 then 1
@@ -129,35 +138,31 @@ rec t2_hit = if tradeDirection == 1 and high >= longT2 then 1
              else if newEntry or firstBar then 0
              else t2_hit[1];
 
-rec stop_hit = if tradeDirection == 1 and low <= longStop then 1
-               else if tradeDirection == -1 and high >= shortStop then 1
+rec stop_hit = if tradeDirection == 1 and low <= entryStopLevel then 1
+               else if tradeDirection == -1 and high >= entryStopLevel then 1
                else if newEntry or firstBar then 0
                else stop_hit[1];
 
 # Bubble conditions - only show if trade is active (stop hasn't been hit)
 def showT1Bubble = (tradeDirection == 1 and high >= longT1 or tradeDirection == -1 and low <= shortT1) and !t1_hit[1] and !stop_hit;
 def showT2Bubble = (tradeDirection == 1 and high >= longT2 or tradeDirection == -1 and low <= shortT2) and !t2_hit[1] and !stop_hit;
-def showStopBubble = (tradeDirection == 1 and low <= longStop or tradeDirection == -1 and high >= shortStop) and !t1_hit and !stop_hit[1];
+def showStopBubble = (tradeDirection == 1 and low <= entryStopLevel or tradeDirection == -1 and high >= entryStopLevel) and !t1_hit and !stop_hit[1];
 
-AddChartBubble(showT1Bubble and tradeDirection == 1, high, "T1", Color.CYAN, yes);
-AddChartBubble(showT1Bubble and tradeDirection == -1, low, "T1", Color.CYAN, no);
-AddChartBubble(showT2Bubble and tradeDirection == 1, high, "T2", Color.CYAN, yes);
-AddChartBubble(showT2Bubble and tradeDirection == -1, low, "T2", Color.CYAN, no);
-AddChartBubble(showStopBubble and tradeDirection == 1, low, "Stop", Color.RED, no);
-AddChartBubble(showStopBubble and tradeDirection == -1, high, "Stop", Color.RED, yes);
+AddChartBubble(showT1Bubble and tradeDirection == 1, high + bubbleOffset, "T1", Color.CYAN, yes);
+AddChartBubble(showT1Bubble and tradeDirection == -1, low - bubbleOffset, "T1", Color.CYAN, no);
+AddChartBubble(showT2Bubble and tradeDirection == 1, high + bubbleOffset, "T2", Color.CYAN, yes);
+AddChartBubble(showT2Bubble and tradeDirection == -1, low - bubbleOffset, "T2", Color.CYAN, no);
+AddChartBubble(showStopBubble and tradeDirection == 1, low - bubbleOffset, "Stop", Color.RED, no);
+AddChartBubble(showStopBubble and tradeDirection == -1, high + bubbleOffset, "Stop", Color.RED, yes);
 
 # ========== Active Stop Loss Lines ==========
-def showActiveLongStop = tradeDirection == 1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
-def showActiveShortStop = tradeDirection == -1 and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
+# Use captured stop level from entry instead of dynamic calculation
+def showActiveStop = (tradeDirection == 1 or tradeDirection == -1) and !t1_hit and !stop_hit and pastOpeningRange and marketOpen;
 
-plot ActiveLongStop = if showActiveLongStop then longStop else Double.NaN;
-plot ActiveShortStop = if showActiveShortStop then shortStop else Double.NaN;
-ActiveLongStop.SetDefaultColor(Color.RED);
-ActiveLongStop.SetStyle(Curve.SHORT_DASH);
-ActiveLongStop.SetLineWeight(2);
-ActiveShortStop.SetDefaultColor(Color.RED);
-ActiveShortStop.SetStyle(Curve.SHORT_DASH);
-ActiveShortStop.SetLineWeight(2);
+plot ActiveStopLevel = if showActiveStop and shouldPlot then entryStopLevel else Double.NaN;
+ActiveStopLevel.SetDefaultColor(Color.RED);
+ActiveStopLevel.SetStyle(Curve.SHORT_DASH);
+ActiveStopLevel.SetLineWeight(2);
 
 # ========== Labels ==========
 def labelIBHigh = if !IsNaN(IBH) then IBH else labelIBHigh[1];
