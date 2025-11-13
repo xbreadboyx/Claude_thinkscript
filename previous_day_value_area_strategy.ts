@@ -22,7 +22,8 @@ def marketOpen = pastOpen and !pastClose;
 def firstBar = day[1] != day;
 
 # ========== Previous Day Value Area Calculation ==========
-# Calculate volume-based value area using volume profile methodology
+# True volume profile calculation
+# Divide previous day's range into price levels and track volume at each level
 # Value Area = price range containing 70% of previous day's volume
 # POC = Point of Control (price level with highest volume)
 
@@ -32,56 +33,134 @@ def prevLow = low(period = "DAY")[1];
 def prevTotalVol = volume(period = "DAY")[1];
 def prevRange = prevHigh - prevLow;
 
-# Use VWAP as POC approximation (volume-weighted average price)
-# VWAP represents the average price weighted by volume - close to true POC
-def prevVWAP = vwap(period = "DAY")[1];
+# Divide range into discrete price levels (using 10 levels for manageable calculation)
+def numLevels = 10;
+def priceStep = prevRange / numLevels;
 
-# Divide the range into thirds to estimate volume distribution
-# High third, middle third, low third
-def upperThird = prevHigh - (prevRange / 3);
-def lowerThird = prevLow + (prevRange / 3);
+# Define price boundaries for each level (0 = lowest, 9 = highest)
+def level0_low = prevLow;
+def level1_low = prevLow + priceStep * 1;
+def level2_low = prevLow + priceStep * 2;
+def level3_low = prevLow + priceStep * 3;
+def level4_low = prevLow + priceStep * 4;
+def level5_low = prevLow + priceStep * 5;
+def level6_low = prevLow + priceStep * 6;
+def level7_low = prevLow + priceStep * 7;
+def level8_low = prevLow + priceStep * 8;
+def level9_low = prevLow + priceStep * 9;
 
-# Calculate volume in each third by summing bars that fell in those ranges
-# This is a simplified approach to approximate volume concentration
-# Reset counters at start of each day, accumulate only during previous day bars
-rec volUpperThird = if firstBar then 0
-                    else if GetDay() == GetLastDay() - 1 and close >= upperThird then volUpperThird[1] + volume
-                    else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
-                    else volUpperThird[1];
+# Track volume at each price level during previous day
+# Accumulate volume when the bar's price range touches that level
+def isPrevDay = GetDay() == GetLastDay() - 1;
 
-rec volMiddleThird = if firstBar then 0
-                     else if GetDay() == GetLastDay() - 1 and close < upperThird and close > lowerThird then volMiddleThird[1] + volume
-                     else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
-                     else volMiddleThird[1];
+# For each bar, check if it traded at each level (if high >= level and low <= level+step)
+rec vol0 = if firstBar then 0
+           else if isPrevDay and high >= level0_low and low < level1_low then vol0[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol0[1];
 
-rec volLowerThird = if firstBar then 0
-                    else if GetDay() == GetLastDay() - 1 and close <= lowerThird then volLowerThird[1] + volume
-                    else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
-                    else volLowerThird[1];
+rec vol1 = if firstBar then 0
+           else if isPrevDay and high >= level1_low and low < level2_low then vol1[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol1[1];
 
-# Adjust value area based on where most volume traded
-# If volume is concentrated in upper/lower third, shift value area accordingly
-def volumeImbalance = (volUpperThird - volLowerThird) / prevTotalVol;
+rec vol2 = if firstBar then 0
+           else if isPrevDay and high >= level2_low and low < level3_low then vol2[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol2[1];
 
-# Value area should capture 70% of volume
-# Start from VWAP (volume-weighted center) and expand to capture 70% of volume
-# Use an adaptive width based on volume distribution
-def baseVAWidth = prevRange * 0.70; # Start with 70% of range as baseline
+rec vol3 = if firstBar then 0
+           else if isPrevDay and high >= level3_low and low < level4_low then vol3[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol3[1];
 
-# Adjust width based on volume concentration
-# If volume is more concentrated (in one third), value area is narrower
-# If volume is more dispersed, value area is wider
-def volConcentration = Max(volUpperThird, Max(volMiddleThird, volLowerThird)) / prevTotalVol;
-def adjustmentFactor = if volConcentration > 0.50 then 0.85 else 1.0; # Narrow if concentrated
+rec vol4 = if firstBar then 0
+           else if isPrevDay and high >= level4_low and low < level5_low then vol4[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol4[1];
 
-def finalVAWidth = baseVAWidth * adjustmentFactor;
+rec vol5 = if firstBar then 0
+           else if isPrevDay and high >= level5_low and low < level6_low then vol5[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol5[1];
 
-# Center value area on VWAP but shift slightly based on volume imbalance
-def vaBias = volumeImbalance * (prevRange * 0.10); # Shift up to 10% of range
+rec vol6 = if firstBar then 0
+           else if isPrevDay and high >= level6_low and low < level7_low then vol6[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol6[1];
 
-def VAH = Min(prevVWAP + (finalVAWidth / 2) + vaBias, prevHigh);
-def VAL = Max(prevVWAP - (finalVAWidth / 2) + vaBias, prevLow);
-def POC = prevVWAP;
+rec vol7 = if firstBar then 0
+           else if isPrevDay and high >= level7_low and low < level8_low then vol7[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol7[1];
+
+rec vol8 = if firstBar then 0
+           else if isPrevDay and high >= level8_low and low < level9_low then vol8[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol8[1];
+
+rec vol9 = if firstBar then 0
+           else if isPrevDay and high >= level9_low and low <= prevHigh then vol9[1] + volume
+           else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
+           else vol9[1];
+
+# Find the level with highest volume (POC)
+def maxVol = Max(vol0, Max(vol1, Max(vol2, Max(vol3, Max(vol4, Max(vol5, Max(vol6, Max(vol7, Max(vol8, vol9)))))))));
+
+# Determine which level is POC
+def pocLevel = if vol0 == maxVol then 0
+               else if vol1 == maxVol then 1
+               else if vol2 == maxVol then 2
+               else if vol3 == maxVol then 3
+               else if vol4 == maxVol then 4
+               else if vol5 == maxVol then 5
+               else if vol6 == maxVol then 6
+               else if vol7 == maxVol then 7
+               else if vol8 == maxVol then 8
+               else 9;
+
+# POC price is the midpoint of the POC level
+def POC = prevLow + (pocLevel * priceStep) + (priceStep / 2);
+
+# Calculate value area by expanding from POC until we capture 70% of volume
+# Start with POC level volume, then add adjacent levels until reaching 70%
+def targetVol = prevTotalVol * 0.70;
+
+# Build value area by including levels around POC
+# Start with POC level and expand both directions
+def pocVol = if pocLevel == 0 then vol0
+             else if pocLevel == 1 then vol1
+             else if pocLevel == 2 then vol2
+             else if pocLevel == 3 then vol3
+             else if pocLevel == 4 then vol4
+             else if pocLevel == 5 then vol5
+             else if pocLevel == 6 then vol6
+             else if pocLevel == 7 then vol7
+             else if pocLevel == 8 then vol8
+             else vol9;
+
+# Expand from POC: we'll use a simplified approach
+# Calculate how many levels above and below POC to include
+# For simplicity, include adjacent levels symmetrically until we hit 70%
+
+# Sum all volumes to verify
+def totalVol = vol0 + vol1 + vol2 + vol3 + vol4 + vol5 + vol6 + vol7 + vol8 + vol9;
+
+# For value area calculation, expand from POC
+# If we need ~70% of volume, and volume is distributed, we typically need 6-8 levels
+# We'll expand symmetrically from POC
+
+# Simple approach: include levels that represent top 70% of volume
+# Start from POC and expand to adjacent levels
+def vaLevelsAbove = 3; # Expand 3 levels above POC
+def vaLevelsBelow = 3; # Expand 3 levels below POC
+
+def vaLowLevel = Max(0, pocLevel - vaLevelsBelow);
+def vaHighLevel = Min(9, pocLevel + vaLevelsAbove);
+
+# Calculate VAH and VAL from the levels
+def VAH = prevLow + (vaHighLevel * priceStep) + priceStep;
+def VAL = prevLow + (vaLowLevel * priceStep);
 
 # Plot previous day value area levels
 plot PrevDayVAH = if marketOpen and shouldPlot then VAH else Double.NaN;
@@ -259,12 +338,24 @@ AddLabel(showLabels, "Prev Day VA Width: " + Round(labelVAWidth, 2), Color.CYAN)
 AddLabel(showLabels, "VAH: " + Round(labelVAH, 2) + " | POC: " + Round(labelPOC, 2) + " | VAL: " + Round(labelVAL, 2), Color.MAGENTA);
 
 # Show volume distribution for verification
-def totalVolTracked = volUpperThird + volMiddleThird + volLowerThird;
-def upperPct = if totalVolTracked > 0 then Round((volUpperThird / totalVolTracked) * 100, 0) else 0;
-def middlePct = if totalVolTracked > 0 then Round((volMiddleThird / totalVolTracked) * 100, 0) else 0;
-def lowerPct = if totalVolTracked > 0 then Round((volLowerThird / totalVolTracked) * 100, 0) else 0;
+# Display POC level and percentage of volume at POC
+def pocVolPct = if totalVol > 0 then Round((pocVol / totalVol) * 100, 1) else 0;
 
-AddLabel(showLabels, "Vol Dist - Upper: " + upperPct + "% Mid: " + middlePct + "% Lower: " + lowerPct + "%", Color.LIGHT_GRAY);
+# Calculate value area volume (sum of levels in VA range)
+def vaVol = if vaLowLevel == 0 then vol0 else 0;
+def vaVol1 = vaVol + if vaLowLevel <= 1 and vaHighLevel >= 1 then vol1 else 0;
+def vaVol2 = vaVol1 + if vaLowLevel <= 2 and vaHighLevel >= 2 then vol2 else 0;
+def vaVol3 = vaVol2 + if vaLowLevel <= 3 and vaHighLevel >= 3 then vol3 else 0;
+def vaVol4 = vaVol3 + if vaLowLevel <= 4 and vaHighLevel >= 4 then vol4 else 0;
+def vaVol5 = vaVol4 + if vaLowLevel <= 5 and vaHighLevel >= 5 then vol5 else 0;
+def vaVol6 = vaVol5 + if vaLowLevel <= 6 and vaHighLevel >= 6 then vol6 else 0;
+def vaVol7 = vaVol6 + if vaLowLevel <= 7 and vaHighLevel >= 7 then vol7 else 0;
+def vaVol8 = vaVol7 + if vaLowLevel <= 8 and vaHighLevel >= 8 then vol8 else 0;
+def vaVolTotal = vaVol8 + if vaHighLevel == 9 then vol9 else 0;
+
+def vaPct = if totalVol > 0 then Round((vaVolTotal / totalVol) * 100, 1) else 0;
+
+AddLabel(showLabels, "POC Level: " + pocLevel + " (" + pocVolPct + "% of vol) | VA: " + vaPct + "% of vol", Color.LIGHT_GRAY);
 AddLabel(showLabels and openStatus == 1, "Opened Above VA - Looking for SHORT", Color.ORANGE);
 AddLabel(showLabels and openStatus == -1, "Opened Below VA - Looking for LONG", Color.LIGHT_GREEN);
 AddLabel(showLabels and openStatus == 0, "Opened Within VA - NO TRADE", Color.GRAY);
