@@ -2,19 +2,15 @@
 # Trades based on previous day's Value Area High (VAH), Value Area Low (VAL), and Point of Control (POC)
 
 input showOnlyToday = yes;
-input valueAreaPercentage = 70.0;
 input Market_Open_Time = 0930;
 input Market_Close_Time = 1600;
 input atrPeriod = 14;
-input atrMultiplierT1 = 1.0;
-input atrMultiplierT2 = 1.5;
 input stopLossATRMultiplier = 1.0;
 input useEMAFilter = yes;
 input emaFast = 8;
 input emaMedium = 21;
 input emaSlow = 34;
 input showLabels = yes;
-input numberOfBars = 30;  # Number of price levels to calculate for value area
 
 # ========== Time and Session Management ==========
 def day = GetDay();
@@ -24,7 +20,6 @@ def pastOpen = SecondsTillTime(Market_Open_Time) <= 0;
 def pastClose = SecondsTillTime(Market_Close_Time) <= 0;
 def marketOpen = pastOpen and !pastClose;
 def firstBar = day[1] != day;
-def isPreviousDay = day == GetLastDay() - 1;
 
 # ========== Previous Day Value Area Calculation ==========
 # Calculate volume-based value area using volume profile methodology
@@ -34,7 +29,6 @@ def isPreviousDay = day == GetLastDay() - 1;
 # Get previous day's high, low, and total volume
 def prevHigh = high(period = "DAY")[1];
 def prevLow = low(period = "DAY")[1];
-def prevClose = close(period = "DAY")[1];
 def prevTotalVol = volume(period = "DAY")[1];
 def prevRange = prevHigh - prevLow;
 
@@ -42,19 +36,7 @@ def prevRange = prevHigh - prevLow;
 # VWAP represents the average price weighted by volume - close to true POC
 def prevVWAP = vwap(period = "DAY")[1];
 
-# Build a volume profile by analyzing intraday volume distribution
-# We'll calculate volume at different price levels relative to the previous day
-# Since we can't store arrays, we'll use a statistical approach
-
-# Key insight: For a normal volume distribution, ~68% of volume is within 1 std dev
-# To capture 70% of volume, we need slightly more than 1 std dev
-# Market profile studies show value area is typically 0.85-1.0 of the range
-
-# Calculate volume distribution metrics by looking at bars from previous day
-# Sum volume in different segments of the price range
-def lookbackPeriod = 390; # Approximately one trading day in minutes (6.5 hours)
-
-# For a more accurate calculation, divide the range into thirds and estimate volume distribution
+# Divide the range into thirds to estimate volume distribution
 # High third, middle third, low third
 def upperThird = prevHigh - (prevRange / 3);
 def lowerThird = prevLow + (prevRange / 3);
@@ -76,11 +58,6 @@ rec volLowerThird = if firstBar then 0
                     else if GetDay() == GetLastDay() - 1 and close <= lowerThird then volLowerThird[1] + volume
                     else if GetDay() == GetLastDay() and GetDay() != GetDay()[1] then 0
                     else volLowerThird[1];
-
-# POC is in the third with the most volume
-def pocInUpper = volUpperThird > volMiddleThird and volUpperThird > volLowerThird;
-def pocInMiddle = volMiddleThird >= volUpperThird and volMiddleThird >= volLowerThird;
-def pocInLower = volLowerThird > volUpperThird and volLowerThird > volMiddleThird;
 
 # Adjust value area based on where most volume traded
 # If volume is concentrated in upper/lower third, shift value area accordingly
